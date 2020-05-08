@@ -220,16 +220,30 @@ class Client(object):
                 action = "favorite"
             else:
                 action = "unfavorite"
+        elif self._args.auto_tag:
+            from topics import _auto_tag
+            self._input = _auto_tag(self._input)
+            action = "tags_add"
         else:
             action = ""
 
-        payload = {
-            "actions":
-            tuple({
-                "action": action,
-                "item_id": info["id"],
-            } for info in self._input),
-        }
+        if not action.startswith("tags_"):
+            payload = {
+                "actions":
+                tuple({
+                    "action": action,
+                    "item_id": info["id"],
+                } for info in self._input),
+            }
+        else:
+            payload = {
+                "actions":
+                tuple({
+                    "action": action,
+                    "item_id": info["id"],
+                    "tags": info.named.get("tags", ""),
+                } for info in self._input),
+            }
 
         self._payload = payload
         self._api_endpoint = API.MODIFY_URL

@@ -190,6 +190,12 @@ class Pockyt(object):
             help=
             "favorite items : <option> : {-1: None, [1: favorite, 0: unfavorite]}",
         )
+        options.add_argument(
+            "-A",
+            "--auto-tag",
+            action="store_true",
+            help="whether links should be auto-tagged",
+        )
 
     def run(self):
         if not self._args.do or self._args.do == "help":
