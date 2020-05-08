@@ -15,6 +15,7 @@ from .wrapper import Browser, FileSystem, Network
 
 # FIXME: Remove this before submitting pull request.
 try:
+    from util.caching import cache_today
     from util.shared import initialize_logging
     initialize_logging(logging.DEBUG)
 except:
@@ -221,6 +222,8 @@ class Client(object):
             df.loc[df[col] == 0, col] = pd.NA
         if len({ "resolved_url", "given_url" } & set(df.columns)) == 2:
             df["resolved_url"] = df["resolved_url"].fillna(df["given_url"])
+        if len({ "resolved_title", "given_title" } & set(df.columns)) == 2:
+            df["resolved_title"] = df["resolved_title"].fillna(df["given_title"])
         return df
 
     def _put(self):
@@ -269,28 +272,36 @@ class Client(object):
             }
 
         elif action in ["tags_add", "tags_replace"]:
-            saved_df = self._clean_get(self._parse_api_response(self._api_request({
-                "detailType": "complete",
-                "sort": "newest",
-                "count": 6000,  # get the newest 10,000 items.  # FIXME: Factor out as constant.  # FIXME: Barfs for >10K
-                "state": "all",
-            }, API.RETRIEVE_URL)))
+            # FIXME: Remove me.
+            @cache_today
+            def __get_recent_bookmarks():
+                return self._clean_get(self._parse_api_response(self._api_request({
+                    "detailType": "complete",
+                    "sort": "newest",
+                    "count": 6000,  # get the newest 10,000 items.  # FIXME: Factor out as constant.  # FIXME: Barfs for >10K
+                    "state": "all",
+                }, API.RETRIEVE_URL)))
+            saved_df = __get_recent_bookmarks()
 
-            taggable_df = self._clean_get(pd.DataFrame([item.named for item in self._input]))
-            trainable = ~saved_df["item_id"].isin(taggable_df["id"])
+            try:
+                taggable_df = self._clean_get(pd.DataFrame([item.named for item in self._input]))
+                trainable = ~saved_df["item_id"].isin(taggable_df["id"])
 
-            from .topics import build_auto_tagger
-            tagger = build_auto_tagger(saved_df.loc[trainable])
-            tagged_df = tagger.transform(saved_df.loc[~trainable])
+                from .topics import build_auto_tagger
+                tagger = build_auto_tagger(saved_df.loc[trainable])
+                tagged_df = tagger.transform(saved_df.loc[~trainable])
 
-            tagged_df["action"] = action
-            payload = {
-                "actions": tuple(tagged_df.reset_index()[["action", "item_id", "tags"]].to_dict("records")),
-            }
+                tagged_df["action"] = action
+                payload = {
+                    "actions": tuple(tagged_df.reset_index()[["action", "item_id", "tags"]].to_dict("records")),
+                }
+            except:
+                logging.warn("boom", exc_info=True)
+                import pdb; pdb.set_trace()
 
             # FIXME: Remove me.
             displayable_df = pd.concat([saved_df.loc[~trainable, ["resolved_title", "excerpt", "resolved_url", "time_added"]], tagged_df], axis=1)
-            logging.info("Auto-tagged %d links:\n%s", displayable_df.shape[0],
+            logging.info("Auto-tagged %d links:\n%s", tagged_df.shape[0],
                          displayable_df.sample(50).sort_values("time_added", ascending=False))
             import pdb; pdb.set_trace()
 
