@@ -175,8 +175,8 @@ class Client(object):
             tuple({
                 "action": "add",
                 "url": info["link"],
-                "tags": ",".join(info.get("tags")),
-            } for info in self._input)
+                "tags": info.named.get("tags", ""),
+            } for info in self._input if info)
         }
 
         self._payload = payload
