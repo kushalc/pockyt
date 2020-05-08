@@ -58,8 +58,7 @@ class Client(object):
         # access API
         for batch in __batch_payload(100):
             logging.debug("Executing network request: %.1000s", batch)
-            self._response = Network.post_request(self._api_endpoint,
-                                                  batch)
+            self._response = Network.post_request(endpoint, batch)
 
     def _output_to_file(self):
         file_path = FileSystem.resolve_path(self._args.output)
@@ -194,6 +193,8 @@ class Client(object):
     def _process_tags(self, tags):
         if tags:
             return tags.keys()
+        else:
+            return []
 
     def _put(self):
         actions = []
