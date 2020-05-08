@@ -6,6 +6,7 @@ import sys
 import time
 from os.path import join
 
+import pandas as pd
 import parse
 
 from .api import API
@@ -56,9 +57,14 @@ class Client(object):
                     yield batch
 
         # access API
+        responses = []
         for batch in __batch_payload(100):
             logging.debug("Executing network request: %.1000s", batch)
-            self._response = Network.post_request(endpoint, batch)
+            responses.append(Network.post_request(endpoint, batch))
+
+        # FIXME: This is a big hack.
+        self._response = responses[-1]
+        return responses
 
     def _output_to_file(self):
         file_path = FileSystem.resolve_path(self._args.output)
@@ -176,19 +182,27 @@ class Client(object):
 
         self._api_request()
 
-        items = self._response.data.get("list", {})
-
+        items_df = self._parse_api_response(self._response)
+        items_df["tags"] = items_df["tags"].apply(_process_tags).apply(",".join)
+        items_df.rename(columns={ "item_id": "id", "resolved_title": "title", "resolved_url": "link" }, inplace=True)
+        items = tuple(items_df[["id", "title", "link", "excerpt", "tags"]].to_dict("records"))
         if len(items) == 0:
             print("No items found !")
             sys.exit(0)
+        self._output = tuple(items)
 
-        self._output = tuple({
-            "id": item.get("item_id"),
-            "title": item.get("resolved_title"),
-            "link": item.get("resolved_url"),
-            "excerpt": item.get("excerpt"),
-            "tags": ",".join(self._process_tags(item.get("tags"))),
-        } for item in items.values())
+    def _parse_api_response(self, responses):
+        if not isinstance(responses, list):
+            responses = [responses]
+
+        parsed_df = pd.concat([pd.DataFrame(response.data.get("list", {})).T for response in responses])
+        if "authors" in parsed_df:
+            parsed_df["authors"] = parsed_df["authors"].apply(lambda x: tuple(y["name"] for y in x.values()) if pd.notnull(x) else ())
+        if "tags" in parsed_df:
+            parsed_df["tags"] = parsed_df["tags"].apply(lambda x: x.keys() if pd.notnull(x) else ())
+
+        # FIXME: Implement images and videos.
+        return parsed_df
 
     def _process_tags(self, tags):
         if tags:
