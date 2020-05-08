@@ -182,7 +182,7 @@ class Client(object):
             "title": item.get("resolved_title"),
             "link": item.get("resolved_url"),
             "excerpt": item.get("excerpt"),
-            "tags": self._process_tags(item.get("tags")),
+            "tags": ",".join(self._process_tags(item.get("tags"))),
         } for item in items.values())
 
     def _process_tags(self, tags):
