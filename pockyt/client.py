@@ -196,6 +196,7 @@ class Client(object):
                 actions.append({
                     "action": "add",
                     "url": info["link"],
+                    "title": info.named.get("title", ""),
                     "tags": info.named.get("tags", ""),
                 })
             except:
