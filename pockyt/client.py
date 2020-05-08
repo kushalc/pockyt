@@ -221,8 +221,6 @@ class Client(object):
             else:
                 action = "unfavorite"
         elif self._args.auto_tag:
-            from topics import _auto_tag
-            self._input = _auto_tag(self._input)
             action = "tags_add"
         else:
             action = ""
@@ -235,14 +233,18 @@ class Client(object):
                     "item_id": info["id"],
                 } for info in self._input),
             }
-        else:
+
+        elif action == "tags_add":
+            from topics import _auto_tag
+            tagged = _auto_tag(self._input)
+
             payload = {
                 "actions":
                 tuple({
                     "action": action,
                     "item_id": info["id"],
                     "tags": info.named.get("tags", ""),
-                } for info in self._input),
+                } for info in tagged),
             }
 
         self._payload = payload
