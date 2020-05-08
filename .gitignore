@@ -22,4 +22,5 @@ var/
 
 # Environment
 Pipfile.lock
+.ipynb_checkpoints/
 .vscode/
