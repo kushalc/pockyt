@@ -144,7 +144,8 @@ class Client(object):
             print("Invalid Format Specifier !")
             sys.exit(1)
         else:
-            self._format_spec = self._args.format + "\n"
+            # NOTE: Addresses excerpts with newlines.
+            self._format_spec = self._args.format.replace("{excerpt}", "{excerpt!r}") + "\n"
             self._unformat_spec = parse.compile(self._args.format)
 
     def _get(self):
@@ -183,7 +184,7 @@ class Client(object):
         self._api_request()
 
         items_df = self._parse_api_response(self._response)
-        items_df["tags"] = items_df["tags"].apply(_process_tags).apply(",".join)
+        items_df["tags"] = items_df["tags"].apply(",".join)
         items_df.rename(columns={ "item_id": "id", "resolved_title": "title", "resolved_url": "link" }, inplace=True)
         items = tuple(items_df[["id", "title", "link", "excerpt", "tags"]].to_dict("records"))
         if len(items) == 0:
@@ -199,16 +200,10 @@ class Client(object):
         if "authors" in parsed_df:
             parsed_df["authors"] = parsed_df["authors"].apply(lambda x: tuple(y["name"] for y in x.values()) if pd.notnull(x) else pd.NA)
         if "tags" in parsed_df:
-            parsed_df["tags"] = parsed_df["tags"].apply(lambda x: x.keys() if pd.notnull(x) else pd.NA)
+            parsed_df["tags"] = parsed_df["tags"].apply(lambda x: tuple(x.keys()) if pd.notnull(x) else ())  # NOTE: sklearn sortability
 
         # FIXME: Implement images and videos.
         return parsed_df
-
-    def _process_tags(self, tags):
-        if tags:
-            return tags.keys()
-        else:
-            return []
 
     def _put(self):
         actions = []
