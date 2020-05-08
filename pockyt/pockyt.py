@@ -193,7 +193,8 @@ class Pockyt(object):
         options.add_argument(
             "-A",
             "--auto-tag",
-            action="store_true",
+            default=None,
+            choices=["add", "replace"],
             help="whether links should be auto-tagged",
         )
 

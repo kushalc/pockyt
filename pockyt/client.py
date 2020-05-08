@@ -221,7 +221,7 @@ class Client(object):
             else:
                 action = "unfavorite"
         elif self._args.auto_tag:
-            action = "tags_add"
+            action = "tags_" + self._args.auto_tag
         else:
             action = ""
 
@@ -234,7 +234,7 @@ class Client(object):
                 } for info in self._input),
             }
 
-        elif action == "tags_add":
+        elif action in ["tags_add", "tags_replace"]:
             from topics import _auto_tag
             tagged = _auto_tag(self._input)
 
@@ -246,6 +246,9 @@ class Client(object):
                     "tags": info.named.get("tags", ""),
                 } for info in tagged),
             }
+
+        else:
+            raise ArgumentError()
 
         self._payload = payload
         self._api_endpoint = API.MODIFY_URL
