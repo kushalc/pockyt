@@ -1,5 +1,7 @@
 from __future__ import absolute_import, print_function, unicode_literals, with_statement
 
+import copy
+import logging
 import sys
 import time
 from os.path import join
@@ -10,6 +12,12 @@ from .api import API
 from .compat import prompt
 from .wrapper import Browser, FileSystem, Network
 
+# FIXME: Remove this before submitting pull request.
+try:
+    from util.shared import initialize_logging
+    initialize_logging(logging.DEBUG)
+except:
+    pass
 
 class Client(object):
     """
@@ -32,8 +40,20 @@ class Client(object):
         self._payload.update(self._credentials)
 
         # access API
-        self._response = Network.post_request(self._api_endpoint,
-                                              self._payload)
+        def __batch_payload(n):
+            if "actions" not in self._payload:
+                yield self._payload
+
+            else:
+                for ndx in range(0, len(self._payload["actions"]), n):
+                    payload = copy.copy(self._payload)
+                    payload["actions"] = self._payload["actions"][ndx:ndx+n]
+                    yield payload
+
+        for payload in __batch_payload(100):
+            logging.debug("Executing network request: %.1000s", payload)
+            self._response = Network.post_request(self._api_endpoint,
+                                                  payload)
 
     def _output_to_file(self):
         file_path = FileSystem.resolve_path(self._args.output)
