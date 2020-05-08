@@ -35,25 +35,31 @@ class Client(object):
         self._output = []
         self._input = []
 
-    def _api_request(self):
-        # add API access credentials
-        self._payload.update(self._credentials)
+    def _api_request(self, payload=None, endpoint=None):
+        if payload is None:
+            payload = self._payload
+        if endpoint is None:
+            endpoint = self._api_endpoint
 
-        # access API
+        # add API access credentials
+        payload.update(self._credentials)
+
+        # batch if necessary
         def __batch_payload(n):
-            if "actions" not in self._payload:
-                yield self._payload
+            if "actions" not in payload:
+                yield payload
 
             else:
-                for ndx in range(0, len(self._payload["actions"]), n):
-                    payload = copy.copy(self._payload)
-                    payload["actions"] = self._payload["actions"][ndx:ndx+n]
-                    yield payload
+                for ndx in range(0, len(payload["actions"]), n):
+                    batch = copy.copy(payload)
+                    batch["actions"] = payload["actions"][ndx:ndx+n]
+                    yield batch
 
-        for payload in __batch_payload(100):
-            logging.debug("Executing network request: %.1000s", payload)
+        # access API
+        for batch in __batch_payload(100):
+            logging.debug("Executing network request: %.1000s", batch)
             self._response = Network.post_request(self._api_endpoint,
-                                                  payload)
+                                                  batch)
 
     def _output_to_file(self):
         file_path = FileSystem.resolve_path(self._args.output)
