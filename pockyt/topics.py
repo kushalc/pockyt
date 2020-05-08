@@ -48,25 +48,20 @@ class AutoTagger__Dummy(AutoTagger):
             ("title_bow", feature_extraction.text.CountVectorizer(), "resolved_title"),
         ], remainder="drop")
 
-class AutoTagger__Chained(AutoTagger):
-    def __init__(self):
-        # FIXME: Implement pipeline.
-        super().__init__(estimator=neighbors.KNeighborsClassifier(strategy="stratified"))
+class AutoTagger__KNN(AutoTagger):
+    def _build_estimator(self):
+        return neighbors.KNeighborsClassifier()
 
-    def transform(self, untagged_df):
-        tag_proba_df = pd.DataFrame(self.predict_proba(untagged_df[_get_ivars(untagged_df)]),
-                                    columns=self.classes_, index=untagged_df.index)
-        tagged_df = tag_proba_df.where(tag_proba_df > 0.500) \
-                                .reset_index() \
-                                .rename(columns={ "index": "item_id" }) \
-                                .melt(id_vars="item_id", var_name="tags", value_name="proba") \
-                                .dropna() \
-                                .groupby("item_id")["tags"] \
-                                .sum() \
-                                .to_frame()
-        return tagged_df
+    def _build_featurizer(self):
+        # FIXME: Try embeddings.
+        # FIXME: Try domains.
+        # FIXME: Try unsupervised techniques.
+        return compose.ColumnTransformer([
+            ("title_bow", feature_extraction.text.TfidfVectorizer(strip_accents="unicode", binary=True), "resolved_title"),
+            ("excerpt_bow", feature_extraction.text.CountVectorizer(), "excerpt"),
+        ], remainder="drop")
 
-def build_auto_tagger(tagged_df, model_cls=AutoTagger__Dummy):
+def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
     tagger = model_cls().fit(tagged_df[_get_ivars(tagged_df)], tagged_df["tags"])
     return tagger
 
