@@ -289,6 +289,9 @@ class Client(object):
             }
 
             # FIXME: Remove me.
+            displayable_df = pd.concat([saved_df.loc[~trainable, ["resolved_title", "excerpt", "resolved_url", "time_added"]], tagged_df], axis=1)
+            logging.info("Auto-tagged %d links:\n%s", displayable_df.shape[0],
+                         displayable_df.sample(50).sort_values("time_added", ascending=False))
             import pdb; pdb.set_trace()
 
         else:
