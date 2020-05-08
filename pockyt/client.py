@@ -170,16 +170,18 @@ class Client(object):
             return tags.keys()
 
     def _put(self):
-        payload = {
-            "actions":
-            tuple({
-                "action": "add",
-                "url": info["link"],
-                "tags": info.named.get("tags", ""),
-            } for info in self._input if info)
-        }
+        actions = []
+        for ix, info in enumerate(self._input):
+            try:
+                actions.append({
+                    "action": "add",
+                    "url": info["link"],
+                    "tags": info.named.get("tags", ""),
+                })
+            except:
+                print("Skipping unparsed line {:}: {:}".format(ix+1, info))
 
-        self._payload = payload
+        self._payload = { "actions": tuple(actions) }
         self._api_endpoint = API.MODIFY_URL
 
         self._api_request()
