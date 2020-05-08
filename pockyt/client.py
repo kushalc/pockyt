@@ -202,8 +202,26 @@ class Client(object):
         if "tags" in parsed_df:
             parsed_df["tags"] = parsed_df["tags"].apply(lambda x: tuple(x.keys()) if pd.notnull(x) else ())  # NOTE: sklearn sortability
 
-        # FIXME: Implement images and videos.
+        # FIXME: Why do 14% of resolved_urls come back empty?
         return parsed_df
+
+    def _clean_get(self, df):
+        for col in ["given_title", "resolved_title", "resolved_url", "title", "link", "excerpt"]:
+            if col not in df:
+                continue
+            df.loc[df[col].str.strip().str.len() == 0, col] = pd.NA
+        for col in ["time_added", "time_updated", "time_read", "time_favorited"]:
+            if col not in df:
+                continue
+            df[col] = pd.to_datetime(df[col], unit="s")
+        for col in ["id", "item_id", "resolved_id", "sort_id", "time_to_read", "word_count", "listen_duration_estimate"]:
+            if col not in df:
+                continue
+            df[col] = df[col].fillna(0).astype(int).astype("Int64")
+            df.loc[df[col] == 0, col] = pd.NA
+        if len({ "resolved_url", "given_url" } & set(df.columns)) == 2:
+            df["resolved_url"] = df["resolved_url"].fillna(df["given_url"])
+        return df
 
     def _put(self):
         actions = []
@@ -251,34 +269,27 @@ class Client(object):
             }
 
         elif action in ["tags_add", "tags_replace"]:
-            tagged_df = self._parse_api_response(self._api_request({
+            saved_df = self._clean_get(self._parse_api_response(self._api_request({
                 "detailType": "complete",
                 "sort": "newest",
                 "count": 6000,  # get the newest 10,000 items.  # FIXME: Factor out as constant.  # FIXME: Barfs for >10K
                 "state": "all",
-            }, API.RETRIEVE_URL))
+            }, API.RETRIEVE_URL)))
 
-            # FIXME: Why do 14% of resolved_urls come back empty?
-            for col in ["given_title", "resolved_title", "resolved_url", "excerpt"]:
-                tagged_df.loc[tagged_df[col].str.strip().str.len() == 0, col] = pd.NA
-            for col in ["time_added", "time_updated", "time_read", "time_favorited"]:
-                tagged_df[col] = pd.to_datetime(tagged_df[col], unit="s")
-            for col in ["item_id", "resolved_id", "sort_id", "time_to_read", "word_count", "listen_duration_estimate"]:
-                tagged_df[col] = tagged_df[col].fillna(0).astype(int).astype("Int64")
-                tagged_df.loc[tagged_df[col] == 0, col] = pd.NA
-            tagged_df["resolved_url"] = tagged_df["resolved_url"].fillna(tagged_df["given_url"])
+            taggable_df = self._clean_get(pd.DataFrame([item.named for item in self._input]))
+            trainable = ~saved_df["item_id"].isin(taggable_df["id"])
 
-            from .topics import _auto_tag
-            tagged = _auto_tag(self._input)
+            from .topics import build_auto_tagger
+            tagger = build_auto_tagger(saved_df.loc[trainable])
+            tagged_df = tagger.transform(saved_df.loc[~trainable])
 
+            tagged_df["action"] = action
             payload = {
-                "actions":
-                tuple({
-                    "action": action,
-                    "item_id": info["id"],
-                    "tags": info.named.get("tags", ""),
-                } for info in tagged),
+                "actions": tuple(tagged_df.reset_index()[["action", "item_id", "tags"]].to_dict("records")),
             }
+
+            # FIXME: Remove me.
+            import pdb; pdb.set_trace()
 
         else:
             raise ArgumentError()
