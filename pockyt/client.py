@@ -68,14 +68,17 @@ class Client(object):
         self._response = responses[-1]
         return responses
 
+    def _sanitize_info(self, info):
+        return { k: (v if pd.notnull(v) else "") for k, v in info.items() }
+
     def _output_to_file(self):
         file_path = FileSystem.resolve_path(self._args.output)
         content = ''.join(
-            map(lambda info: self._format_spec.format(**info), self._output))
+            map(lambda info: self._format_spec.format(**self._sanitize_info(info)), self._output))
         FileSystem.write_to_file(file_path, content)
 
     def _print_to_console(self, info):
-        line = self._format_spec.format(**info)
+        line = self._format_spec.format(**self._sanitize_info(info))
         try:
             print(line, end="")
         except UnicodeEncodeError:
@@ -138,7 +141,7 @@ class Client(object):
         except TypeError:
             self._args.format = self._args.format.decode(API.DECODING)
 
-        info = dict((key, None) for key in API.INFO_KEYS)
+        info = dict((key, None) for key in API.INFO_KEYS + API.RAW_KEYS)
 
         try:
             self._args.format.format(**info)
@@ -185,10 +188,11 @@ class Client(object):
 
         self._api_request()
 
-        items_df = self._parse_api_response(self._response)
+        items_df = self._clean_get(self._parse_api_response(self._response), backfill=False)
         items_df["tags"] = items_df["tags"].apply(",".join)
-        items_df.rename(columns={ "item_id": "id", "resolved_title": "title", "resolved_url": "link" }, inplace=True)
-        items = tuple(items_df[["id", "title", "link", "excerpt", "tags"]].to_dict("records"))
+        for source, target in API.INFO_SYNONYMS.items():
+            items_df[target] = items_df[source]
+        items = tuple(items_df.to_dict("records"))
         if len(items) == 0:
             print("No items found !")
             sys.exit(0)
@@ -207,7 +211,7 @@ class Client(object):
         # FIXME: Why do 14% of resolved_urls come back empty?
         return parsed_df
 
-    def _clean_get(self, df):
+    def _clean_get(self, df, backfill=True):
         for col in ["given_title", "resolved_title", "resolved_url", "title", "link", "excerpt"]:
             if col not in df:
                 continue
@@ -221,9 +225,9 @@ class Client(object):
                 continue
             df[col] = df[col].fillna(0).astype(int).astype("Int64")
             df.loc[df[col] == 0, col] = pd.NA
-        if len({ "resolved_url", "given_url" } & set(df.columns)) == 2:
+        if backfill and len({ "resolved_url", "given_url" } & set(df.columns)) == 2:
             df["resolved_url"] = df["resolved_url"].fillna(df["given_url"])
-        if len({ "resolved_title", "given_title" } & set(df.columns)) == 2:
+        if backfill and len({ "resolved_title", "given_title" } & set(df.columns)) == 2:
             df["resolved_title"] = df["resolved_title"].fillna(df["given_title"])
         return df
 

@@ -28,7 +28,14 @@ class API(object):
 
     CONTENT_TYPE = "application/json"
 
+    INFO_SYNONYMS = {
+        "item_id": "id",
+        "resolved_title": "title",
+        "resolved_url": "link",
+        "time_added": "time",
+    }
     INFO_KEYS = ["id", "title", "link", "excerpt", "tags", "time"]
+    RAW_KEYS = ['item_id', 'resolved_id', 'given_url', 'given_title', 'favorite', 'status', 'time_added', 'time_updated', 'time_read', 'time_favorited', 'sort_id', 'resolved_title', 'resolved_url', 'excerpt', 'is_article', 'is_index', 'has_video', 'has_image', 'word_count', 'lang', 'tags', 'authors', 'domain_metadata', 'listen_duration_estimate', 'time_to_read', 'top_image_url', 'amp_url', 'image', 'images', 'videos']
 
     @classmethod
     def get_auth_user_url(cls, rt):
