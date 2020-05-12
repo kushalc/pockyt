@@ -274,13 +274,19 @@ class Client(object):
         elif action in ["tags_add", "tags_replace"]:
             # FIXME: Remove me.
             @cache_today
-            def __get_recent_bookmarks():
-                return self._clean_get(self._parse_api_response(self._api_request({
-                    "detailType": "complete",
-                    "sort": "newest",
-                    "count": 6000,  # get the newest 10,000 items.  # FIXME: Factor out as constant.  # FIXME: Barfs for >10K
-                    "state": "all",
-                }, API.RETRIEVE_URL)))
+            def __get_recent_bookmarks(n=5000, pages_max=10, force=False):
+                concatenable = []  # NOTE: Paginating since barfs for count=10000.
+                for ix in range(pages_max):
+                    concatenable.append(self._clean_get(self._parse_api_response(self._api_request({
+                        "detailType": "complete",
+                        "sort": "newest",
+                        "offset": n*ix,
+                        "count": n,
+                        "state": "all",
+                    }, API.RETRIEVE_URL))))
+                    if concatenable[-1].shape[0] < n:
+                        break
+                return pd.concat(concatenable)
             saved_df = __get_recent_bookmarks()
 
             try:
@@ -301,7 +307,7 @@ class Client(object):
 
             # FIXME: Remove me.
             displayable_df = pd.concat([saved_df.loc[~trainable, ["resolved_title", "excerpt", "resolved_url", "time_added"]], tagged_df], axis=1)
-            logging.info("Auto-tagged %d links:\n%s", tagged_df.shape[0],
+            logging.info("Auto-tagged %d links:\n%s\n...", tagged_df.shape[0],
                          displayable_df.sample(50).sort_values("time_added", ascending=False))
             import pdb; pdb.set_trace()
 
