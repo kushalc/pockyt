@@ -12,18 +12,15 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         self.set_params(featurizer=featurizer)
 
     def fit(self, X, y):
-        Xt = X.dropna()  # FIXME: Irritating, but good enough for now.
-        yt = y.loc[Xt.index]
+        self.binarizer_ = preprocessing.MultiLabelBinarizer().fit(y)
+        self.featurizer_ = self.featurizer.fit(X)
 
-        self.binarizer_ = preprocessing.MultiLabelBinarizer().fit(yt)
-        self.featurizer_ = self.featurizer.fit(Xt)
-
-        Yt = pd.DataFrame(self.binarizer_.transform(yt), index=Xt.index, columns=self.binarizer_.classes_)
-        Xt = self.featurizer_.transform(Xt)
+        Yt = pd.DataFrame(self.binarizer_.transform(y), index=X.index, columns=self.binarizer_.classes_)
+        Xt = self.featurizer_.transform(X)
         return super().fit(Xt, Yt)
 
     def transform(self, untagged_df):
-        untagged_df = untagged_df[_get_ivars(untagged_df)].dropna()  # FIXME
+        untagged_df = untagged_df[_get_ivars(untagged_df)]
         Xt = self.featurizer_.transform(untagged_df)
 
         tagged_df = pd.DataFrame({ "tags": self.binarizer_.inverse_transform(self.predict(Xt)) }, index=untagged_df.index)
@@ -36,16 +33,17 @@ class AutoTagger(multioutput.MultiOutputClassifier):
     def _build_estimator(self):
         raise NotImplementedError()
 
+    def _protect_nullable(self, featurizer, fill_value=""):
+        return make_pipeline(preprocessing.FunctionTransformer(lambda df: df.fillna(fill_value)),
+                             featurizer)
+
 class AutoTagger__Dummy(AutoTagger):
     def _build_estimator(self):
         return dummy.DummyClassifier(strategy="stratified")
 
     def _build_featurizer(self):
         return compose.ColumnTransformer([
-            # FIXME: Make this not break.
-            # ("title_bow", make_pipeline(impute.SimpleImputer(strategy="constant"),
-            #                             feature_extraction.text.CountVectorizer()), ["resolved_title"]),
-            ("title_bow", feature_extraction.text.CountVectorizer(), "resolved_title"),
+            ("title_bow", self._protect_nullable(feature_extraction.text.CountVectorizer()), "resolved_title"),
         ], remainder="drop")
 
 class AutoTagger__KNN(AutoTagger):
@@ -53,12 +51,16 @@ class AutoTagger__KNN(AutoTagger):
         return neighbors.KNeighborsClassifier()
 
     def _build_featurizer(self):
-        # FIXME: Try embeddings.
+        def __binary_tfidf():
+            return feature_extraction.text.TfidfVectorizer(strip_accents="unicode", binary=True)
+
         # FIXME: Try domains.
+        # FIXME: Try embeddings.
         # FIXME: Try unsupervised techniques.
+        # FIXME: Will almost certainly need raw HTML.
         return compose.ColumnTransformer([
-            ("title_bow", feature_extraction.text.TfidfVectorizer(strip_accents="unicode", binary=True), "resolved_title"),
-            ("excerpt_bow", feature_extraction.text.CountVectorizer(), "excerpt"),
+            ("bow_resolved_title", self._protect_nullable(__binary_tfidf()), "resolved_title"),
+            ("bow_excerpt", self._protect_nullable(__binary_tfidf()), "excerpt"),
         ], remainder="drop")
 
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
