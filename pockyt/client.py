@@ -6,6 +6,7 @@ import sys
 import time
 from os.path import join
 
+import dateparser
 import pandas as pd
 import parse
 
@@ -59,8 +60,8 @@ class Client(object):
 
         # access API
         responses = []
-        for batch in __batch_payload(100):
-            logging.debug("Executing network request: %.1000s", batch)
+        for batch in __batch_payload(250):
+            logging.debug("Executing network request with %d actions: %.1000s...", len(batch.get("actions", [None])), batch)
             responses.append(Network.post_request(endpoint, batch))
 
         # FIXME: This is a big hack.
@@ -230,12 +231,21 @@ class Client(object):
         actions = []
         for ix, info in enumerate(self._input):
             try:
-                actions.append({
+                action = {
                     "action": "add",
                     "url": info["link"],
-                    "title": info.named.get("title", ""),
-                    "tags": info.named.get("tags", ""),
-                })
+                }
+                if info.named.get("title"):
+                    action["title"] = info.named["title"]
+                if info.named.get("tags"):
+                    action["tags"] = info.named["tags"]
+                if info.named.get("time"):
+                    action["time"] = info.named["time"]
+                    if isinstance(action["time"], str) and not action["time"].isdigit():
+                        action["time"] = dateparser.parse(action["time"])
+                    if not isinstance(action["time"], (int, float)):
+                        action["time"] = round(action["time"].timestamp())
+                actions.append(action)
             except:
                 print("Skipping unparsed line {:}: {:}".format(ix+1, info))
 
@@ -263,13 +273,16 @@ class Client(object):
             action = ""
 
         if not action.startswith("tags_"):
-            payload = {
-                "actions":
-                tuple({
+            actions = []
+            for info in self._input:
+                action = {
                     "action": action,
                     "item_id": info["id"],
-                } for info in self._input),
-            }
+                }
+                if "time" in info.named:
+                    action["time"] = info.named["time"]
+
+            payload = { "actions": tuple(actions) }
 
         elif action in ["tags_add", "tags_replace"]:
             # FIXME: Remove me.
