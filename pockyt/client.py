@@ -289,6 +289,8 @@ class Client(object):
             payload = { "actions": tuple(actions) }
 
         elif action in ["tags_add", "tags_replace"]:
+            from .topics import build_auto_tagger, augment_dataset
+
             # FIXME: Remove me.
             @cache_today
             def __get_recent_bookmarks(n=5000, pages_max=10, force=False):
@@ -305,12 +307,12 @@ class Client(object):
                         break
                 return pd.concat(concatenable)
             saved_df = __get_recent_bookmarks()
+            saved_df = augment_dataset(saved_df)
 
             try:
                 taggable_df = self._clean_get(pd.DataFrame([item.named for item in self._input]))
                 trainable = ~saved_df["item_id"].isin(taggable_df["id"])
 
-                from .topics import build_auto_tagger
                 tagger = build_auto_tagger(saved_df.loc[trainable])
                 tagged_df = tagger.transform(saved_df.loc[~trainable])
 

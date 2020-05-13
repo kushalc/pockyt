@@ -1,12 +1,15 @@
 import logging
+import requests
 
 import spacy
 import numpy as np
 import pandas as pd
+from bs4 import BeautifulSoup
 from sklearn.pipeline import make_pipeline
 from sklearn import compose, dummy, feature_extraction, impute, multioutput, neighbors, preprocessing
 
 # FIXME: Remove me.
+from util.caching import cache_parquet_today, cache_today
 from util.performance import instrument_latency
 
 class AutoTagger(multioutput.MultiOutputClassifier):
@@ -75,12 +78,12 @@ class AutoTagger__KNN(AutoTagger):
                 return np.vstack([doc.vector for doc in nlp.pipe(texts_s, disable=["tagger", "parser", "ner"])])
             return preprocessing.FunctionTransformer(__transform)
 
-        def __sparknlp_embeddings():
-            from sparknlp.annotator import SentenceEmbeddings
-            from sparknlp.pretrained import PretrainedPipeline
-            import sparknlp
+        from sparknlp.annotator import SentenceEmbeddings
+        from sparknlp.pretrained import PretrainedPipeline
+        import sparknlp
 
-            spark = sparknlp.start()
+        spark = sparknlp.start()
+        def __sparknlp_embeddings():
             pipeline = PretrainedPipeline("explain_document_dl", lang="en")
             embedder = SentenceEmbeddings().setInputCols(["document", "embeddings"]) \
                                            .setOutputCol("sentence_embeddings") \
@@ -116,6 +119,31 @@ class AutoTagger__KNN(AutoTagger):
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
     tagger = model_cls().fit(tagged_df[_get_ivars(tagged_df)], tagged_df["tags"])
     return tagger
+
+def augment_dataset(saved_df):
+    @cache_today
+    def __retrieve_html(url):
+        try:
+            return requests.get(url, timeout=3.000).text
+        except:
+            logging.warn("Couldn't retrieve URL: %s", url, exc_info=True)
+            return pd.NA
+
+    def __extract_text(html):
+        if pd.isnull(html):
+            return pd.NA
+
+        soup = BeautifulSoup(html)
+        _ = [s.extract() for s in soup(['style', 'script', 'head', 'title'])]  # discard
+        text = soup.getText()
+        return text
+
+    from joblib import Parallel, delayed, parallel_backend
+    with parallel_backend("threading", n_jobs=10):
+        saved_df["html"] = Parallel()(delayed(__retrieve_html)(url) for url in saved_df["resolved_url"])
+    with parallel_backend("loky", n_jobs=2):
+        saved_df["text"] = Parallel()(delayed(__extract_text)(html) for html in saved_df["html"])
+    return saved_df
 
 def _get_ivars(tagged_df):
     # FIXME: Brittle.
