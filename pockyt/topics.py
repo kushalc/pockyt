@@ -35,12 +35,23 @@ class AutoTagger(multioutput.MultiOutputClassifier):
 
     # FIXME: Remove me.
     @instrument_latency
-    def transform(self, untagged_df):
+    def predict(self, untagged_df):
         untagged_df = untagged_df[_get_ivars(untagged_df)]
         Xt = self.featurizer_.transform(untagged_df)
+        return super().predict(Xt)
 
-        tagged_df = pd.DataFrame({ "tags": self.binarizer_.inverse_transform(self.predict(Xt)) }, index=untagged_df.index)
+    def transform(self, untagged_df):
+        # classification-based
+        tagged_df = pd.DataFrame({ "classifier_tags": self.binarizer_.inverse_transform(self.predict(untagged_df)) },
+                                 index=untagged_df.index)
         tagged_df.index.name = "item_id"
+
+        # domain-based
+        tfr = self.featurizer_.named_transformers_["url_domain"].steps[1][1]
+        tagged_df["domain_tags"] = tfr.inverse_transform(tfr.transform(untagged_df[["resolved_domain"]])).reshape(-1)
+        tagged_df["domain_tags"] = tagged_df["domain_tags"].apply(lambda x: (x,) if pd.notnull(x) else ())
+
+        tagged_df["tags"] = tagged_df.sum(axis=1)
         return tagged_df
 
     def _build_featurizer(self):
@@ -52,6 +63,17 @@ class AutoTagger(multioutput.MultiOutputClassifier):
     def _protect_nullable(self, featurizer, fill_value=""):
         return make_pipeline(pp.FunctionTransformer(lambda df: df.fillna(fill_value)),
                              featurizer)
+
+class ResilientOrdinalEncoder(pp.OrdinalEncoder):
+    def transform(self, X):
+        X_int, X_mask = self._transform(X, handle_unknown="ignore")
+        X_int[~X_mask] = -1
+        return X_int.astype(self.dtype, copy=False)
+
+    def inverse_transform(self, X):
+        Xt = super().inverse_transform(X)
+        Xt[X == -1] = pd.NA
+        return Xt
 
 class AutoTagger__Dummy(AutoTagger):
     def _build_estimator(self):
@@ -109,15 +131,13 @@ class AutoTagger__KNN(AutoTagger):
                 return embeddings_ndy
             return pp.FunctionTransformer(__transform)
 
-        # FIXME: Try domains.
         # FIXME: Try unsupervised techniques.
         return cp.ColumnTransformer([
-            # ("bow_resolved_title", self._protect_nullable(__binary_tfidf()), "resolved_title"),
-            # ("bow_excerpt", self._protect_nullable(__binary_tfidf()), "excerpt"),
-            ("emb_resolved_title", self._protect_nullable(__sparknlp_embeddings()), "resolved_title"),
-            ("emb_excerpt", self._protect_nullable(__sparknlp_embeddings()), "excerpt"),
-            ("emb_text", self._protect_nullable(__sparknlp_embeddings()), "text"),
-            ("url_domain", self._protect_nullable(pp.OrdinalEncoder()), "resolved_url"),
+            # ("emb_resolved_title", self._protect_nullable(__sparknlp_embeddings()), "resolved_title"),
+            # ("emb_excerpt", self._protect_nullable(__sparknlp_embeddings()), "excerpt"),
+            # ("emb_text", self._protect_nullable(__sparknlp_embeddings()), "text"),
+            ("url_domain", self._protect_nullable(ResilientOrdinalEncoder()), ["resolved_domain"]),
+            ("url_categories", self._protect_nullable(fe.text.CountVectorizer(max_df=0.250, min_df=10)), "resolved_path"),
         ], remainder="drop")
 
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
@@ -133,6 +153,18 @@ def augment_dataset(saved_df):
         domain = ".".join(domain.rsplit(".")[-2:])
         return domain
     saved_df["resolved_domain"] = saved_df["resolved_url"].apply(__extract_domain)
+
+    def __extract_path(url):
+        if pd.isnull(url):
+            return pd.NA
+
+        path = urlparse(url).path
+        path = re.sub(r"\b\d+\b", "", path)  # dates, post-ids, etc.
+        path = re.sub(r"(^/r\b|/comments/.*$)", "", path)  # reddit
+        path = re.sub(r"//", "/", path)
+        path = path.strip("/")
+        return path
+    saved_df["resolved_path"] = saved_df["resolved_url"].apply(__extract_path)
 
     # text
     @cache_today
@@ -152,17 +184,26 @@ def augment_dataset(saved_df):
         text = soup.getText()
         return text
 
-    from joblib import Parallel, delayed, parallel_backend
-    with parallel_backend("threading", n_jobs=10):
-        saved_df["html"] = Parallel()(delayed(__retrieve_html)(url) for url in saved_df["resolved_url"])
-    with parallel_backend("loky", n_jobs=2):
-        saved_df["text"] = Parallel()(delayed(__extract_text)(html) for html in saved_df["html"])
-    saved_df["text"] = saved_df["text"].str.strip().str.replace(r"\s{2,}", " ")
-    saved_df.loc[saved_df["text"].str.len() == 0, "text"] = pd.NA
+    # from joblib import Parallel, delayed, parallel_backend
+    # with parallel_backend("threading", n_jobs=10):
+    #     saved_df["html"] = Parallel()(delayed(__retrieve_html)(url) for url in saved_df["resolved_url"])
+    # with parallel_backend("loky", n_jobs=2):
+    #     saved_df["text"] = Parallel()(delayed(__extract_text)(html) for html in saved_df["html"])
+    # saved_df["text"] = saved_df["text"].str.strip().str.replace(r"\s{2,}", " ")
+    # saved_df.loc[saved_df["text"].str.len() == 0, "text"] = pd.NA
 
     return saved_df
 
+TAGGABLE_IVARS = [
+    "resolved_title",
+    "excerpt",
+    "text",
+    "resolved_url",
+    "resolved_domain",
+    "resolved_path",
+    "time_added",
+]
 def _get_ivars(tagged_df):
     # FIXME: Brittle.
     # return [col for col in tagged_df.columns if col not in ["tags", "videos", "amp_url", "given_title"]]
-    return ["resolved_title", "excerpt", "text", "resolved_url", "resolved_domain", "time_added"]
+    return [col for col in TAGGABLE_IVARS if col in tagged_df.columns]
