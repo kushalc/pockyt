@@ -1,8 +1,13 @@
+import logging
+
 import spacy
 import numpy as np
 import pandas as pd
 from sklearn.pipeline import make_pipeline
 from sklearn import compose, dummy, feature_extraction, impute, multioutput, neighbors, preprocessing
+
+# FIXME: Remove me.
+from util.performance import instrument_latency
 
 class AutoTagger(multioutput.MultiOutputClassifier):
     def __init__(self, featurizer=None, estimator=None):
@@ -13,6 +18,8 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         super().__init__(estimator=estimator)
         self.set_params(featurizer=featurizer)
 
+    # FIXME: Remove me.
+    @instrument_latency
     def fit(self, X, y):
         self.binarizer_ = preprocessing.MultiLabelBinarizer().fit(y)
         self.featurizer_ = self.featurizer.fit(X)
@@ -21,6 +28,8 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         Xt = self.featurizer_.transform(X)
         return super().fit(Xt, Yt)
 
+    # FIXME: Remove me.
+    @instrument_latency
     def transform(self, untagged_df):
         untagged_df = untagged_df[_get_ivars(untagged_df)]
         Xt = self.featurizer_.transform(untagged_df)
@@ -56,20 +65,52 @@ class AutoTagger__KNN(AutoTagger):
         def __binary_tfidf():
             return feature_extraction.text.TfidfVectorizer(strip_accents="unicode", binary=True)
 
+        # FIXME: Too slow?
         def __spacy_embeddings():
             nlp = spacy.load("en_core_web_md")
-            def __spacy_transform(texts):
-                return np.vstack([doc.vector for doc in nlp.pipe(texts, disable=["tagger", "parser", "ner"])])
-            return preprocessing.FunctionTransformer(__spacy_transform)
+
+            # FIXME: Remove me.
+            @instrument_latency
+            def __transform(texts_s):
+                return np.vstack([doc.vector for doc in nlp.pipe(texts_s, disable=["tagger", "parser", "ner"])])
+            return preprocessing.FunctionTransformer(__transform)
+
+        def __sparknlp_embeddings():
+            from sparknlp.annotator import SentenceEmbeddings
+            from sparknlp.pretrained import PretrainedPipeline
+            import sparknlp
+
+            spark = sparknlp.start()
+            pipeline = PretrainedPipeline("explain_document_dl", lang="en")
+            embedder = SentenceEmbeddings().setInputCols(["document", "embeddings"]) \
+                                           .setOutputCol("sentence_embeddings") \
+                                           .setPoolingStrategy("AVERAGE")
+
+            # FIXME: Remove me.
+            @instrument_latency
+            def __transform(texts_s):
+                text_df = spark.createDataFrame(pd.DataFrame({ "text": texts_s }))
+                results_df = embedder.transform(pipeline.transform(text_df))
+
+                # FIXME: Hacky. There's surely a better way to do this.
+                embeddings_ndy = np.vstack([np.array(x.embeddings).reshape(-1, 100).mean(axis=0)
+                                            for x in results_df.select("sentence_embeddings.embeddings").collect()])
+
+                nulled_ids = texts_s.iloc[np.where((~np.isfinite(embeddings_ndy)).any(axis=1))].index
+                if len(nulled_ids):
+                    logging.info("Backfilling %d (%.1f%%) documents without embeddings:\n%s", len(nulled_ids),
+                                 len(nulled_ids) / len(texts_s) * 100, texts_s.loc[nulled_ids].to_string())
+                    embeddings_ndy = np.nan_to_num(embeddings_ndy)
+                return embeddings_ndy
+            return preprocessing.FunctionTransformer(__transform)
 
         # FIXME: Try domains.
-        # FIXME: Try embeddings.
         # FIXME: Try unsupervised techniques.
         # FIXME: Try crawling/parsing raw HTML.
         return compose.ColumnTransformer([
             # ("bow_resolved_title", self._protect_nullable(__binary_tfidf()), "resolved_title"),
             # ("bow_excerpt", self._protect_nullable(__binary_tfidf()), "excerpt"),
-            ("emb_resolved_title", self._protect_nullable(__spacy_embeddings()), "resolved_title"),
+            ("emb_resolved_title", self._protect_nullable(__sparknlp_embeddings()), "resolved_title"),
         ], remainder="drop")
 
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):

@@ -18,7 +18,7 @@ from .wrapper import Browser, FileSystem, Network
 try:
     from util.caching import cache_today
     from util.shared import initialize_logging
-    initialize_logging(logging.DEBUG)
+    initialize_logging(logging.INFO)
 except:
     pass
 
