@@ -1,12 +1,14 @@
 import logging
 import requests
+from urllib.parse import urlparse
 
+import regex as re
 import spacy
 import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
 from sklearn.pipeline import make_pipeline
-from sklearn import compose, dummy, feature_extraction, impute, multioutput, neighbors, preprocessing
+from sklearn import compose as cp, dummy, feature_extraction as fe, impute, multioutput, neighbors, preprocessing as pp
 
 # FIXME: Remove me.
 from util.caching import cache_parquet_today, cache_today
@@ -24,7 +26,7 @@ class AutoTagger(multioutput.MultiOutputClassifier):
     # FIXME: Remove me.
     @instrument_latency
     def fit(self, X, y):
-        self.binarizer_ = preprocessing.MultiLabelBinarizer().fit(y)
+        self.binarizer_ = pp.MultiLabelBinarizer().fit(y)
         self.featurizer_ = self.featurizer.fit(X)
 
         Yt = pd.DataFrame(self.binarizer_.transform(y), index=X.index, columns=self.binarizer_.classes_)
@@ -48,7 +50,7 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         raise NotImplementedError()
 
     def _protect_nullable(self, featurizer, fill_value=""):
-        return make_pipeline(preprocessing.FunctionTransformer(lambda df: df.fillna(fill_value)),
+        return make_pipeline(pp.FunctionTransformer(lambda df: df.fillna(fill_value)),
                              featurizer)
 
 class AutoTagger__Dummy(AutoTagger):
@@ -56,8 +58,8 @@ class AutoTagger__Dummy(AutoTagger):
         return dummy.DummyClassifier(strategy="stratified")
 
     def _build_featurizer(self):
-        return compose.ColumnTransformer([
-            ("title_bow", self._protect_nullable(feature_extraction.text.CountVectorizer()), "resolved_title"),
+        return cp.ColumnTransformer([
+            ("title_bow", self._protect_nullable(fe.text.CountVectorizer()), "resolved_title"),
         ], remainder="drop")
 
 class AutoTagger__KNN(AutoTagger):
@@ -66,7 +68,7 @@ class AutoTagger__KNN(AutoTagger):
 
     def _build_featurizer(self):
         def __binary_tfidf():
-            return feature_extraction.text.TfidfVectorizer(strip_accents="unicode", binary=True)
+            return fe.text.TfidfVectorizer(strip_accents="unicode", binary=True)
 
         # FIXME: Too slow?
         def __spacy_embeddings():
@@ -76,7 +78,7 @@ class AutoTagger__KNN(AutoTagger):
             @instrument_latency
             def __transform(texts_s):
                 return np.vstack([doc.vector for doc in nlp.pipe(texts_s, disable=["tagger", "parser", "ner"])])
-            return preprocessing.FunctionTransformer(__transform)
+            return pp.FunctionTransformer(__transform)
 
         from sparknlp.annotator import SentenceEmbeddings
         from sparknlp.pretrained import PretrainedPipeline
@@ -105,15 +107,17 @@ class AutoTagger__KNN(AutoTagger):
                                  len(nulled_ids) / len(texts_s) * 100, texts_s.loc[nulled_ids].to_string())
                     embeddings_ndy = np.nan_to_num(embeddings_ndy)
                 return embeddings_ndy
-            return preprocessing.FunctionTransformer(__transform)
+            return pp.FunctionTransformer(__transform)
 
         # FIXME: Try domains.
         # FIXME: Try unsupervised techniques.
-        # FIXME: Try crawling/parsing raw HTML.
-        return compose.ColumnTransformer([
+        return cp.ColumnTransformer([
             # ("bow_resolved_title", self._protect_nullable(__binary_tfidf()), "resolved_title"),
             # ("bow_excerpt", self._protect_nullable(__binary_tfidf()), "excerpt"),
             ("emb_resolved_title", self._protect_nullable(__sparknlp_embeddings()), "resolved_title"),
+            ("emb_excerpt", self._protect_nullable(__sparknlp_embeddings()), "excerpt"),
+            ("emb_text", self._protect_nullable(__sparknlp_embeddings()), "text"),
+            ("url_domain", self._protect_nullable(pp.OrdinalEncoder()), "resolved_url"),
         ], remainder="drop")
 
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
@@ -121,6 +125,16 @@ def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
     return tagger
 
 def augment_dataset(saved_df):
+    # domain
+    def __extract_domain(url):
+        if pd.isnull(url):
+            return pd.NA
+        domain = urlparse(url).hostname
+        domain = ".".join(domain.rsplit(".")[-2:])
+        return domain
+    saved_df["resolved_domain"] = saved_df["resolved_url"].apply(__extract_domain)
+
+    # text
     @cache_today
     def __retrieve_html(url):
         try:
@@ -143,9 +157,12 @@ def augment_dataset(saved_df):
         saved_df["html"] = Parallel()(delayed(__retrieve_html)(url) for url in saved_df["resolved_url"])
     with parallel_backend("loky", n_jobs=2):
         saved_df["text"] = Parallel()(delayed(__extract_text)(html) for html in saved_df["html"])
+    saved_df["text"] = saved_df["text"].str.strip().str.replace(r"\s{2,}", " ")
+    saved_df.loc[saved_df["text"].str.len() == 0, "text"] = pd.NA
+
     return saved_df
 
 def _get_ivars(tagged_df):
     # FIXME: Brittle.
     # return [col for col in tagged_df.columns if col not in ["tags", "videos", "amp_url", "given_title"]]
-    return ["resolved_title", "excerpt", "resolved_url", "time_added"]
+    return ["resolved_title", "excerpt", "text", "resolved_url", "resolved_domain", "time_added"]
