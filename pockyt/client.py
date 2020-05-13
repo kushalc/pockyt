@@ -61,9 +61,9 @@ class Client(object):
         # access API
         responses = []
         for batch in __batch_payload(250):
-            logging.debug("Executing network request with %d actions: %.1000s...", len(batch.get("actions", [None])), batch)
+            logging.info("Executing network request with %d actions: %.1000s...",
+                         len(batch.get("actions", [None])), batch)
             responses.append(Network.post_request(endpoint, batch))
-
         # FIXME: This is a big hack.
         self._response = responses[-1]
         return responses
@@ -189,7 +189,8 @@ class Client(object):
         self._api_request()
 
         items_df = self._clean_get(self._parse_api_response(self._response), backfill=False)
-        items_df["tags"] = items_df["tags"].apply(",".join)
+        if "tags" in items_df:
+            items_df["tags"] = items_df["tags"].apply(",".join)
         for source, target in API.INFO_SYNONYMS.items():
             items_df[target] = items_df[source]
         items = tuple(items_df.to_dict("records"))
@@ -279,12 +280,13 @@ class Client(object):
         if not action.startswith("tags_"):
             actions = []
             for info in self._input:
-                action = {
+                item = {
                     "action": action,
                     "item_id": info["id"],
                 }
                 if "time" in info.named:
-                    action["time"] = info.named["time"]
+                    item["time"] = info.named["time"]
+                actions.append(item)
 
             payload = { "actions": tuple(actions) }
 
