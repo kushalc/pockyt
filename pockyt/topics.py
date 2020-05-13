@@ -1,3 +1,5 @@
+import spacy
+import numpy as np
 import pandas as pd
 from sklearn.pipeline import make_pipeline
 from sklearn import compose, dummy, feature_extraction, impute, multioutput, neighbors, preprocessing
@@ -54,13 +56,20 @@ class AutoTagger__KNN(AutoTagger):
         def __binary_tfidf():
             return feature_extraction.text.TfidfVectorizer(strip_accents="unicode", binary=True)
 
+        def __spacy_embeddings():
+            nlp = spacy.load("en_core_web_md")
+            def __spacy_transform(texts):
+                return np.vstack([doc.vector for doc in nlp.pipe(texts, disable=["tagger", "parser", "ner"])])
+            return preprocessing.FunctionTransformer(__spacy_transform)
+
         # FIXME: Try domains.
         # FIXME: Try embeddings.
         # FIXME: Try unsupervised techniques.
-        # FIXME: Will almost certainly need raw HTML.
+        # FIXME: Try crawling/parsing raw HTML.
         return compose.ColumnTransformer([
-            ("bow_resolved_title", self._protect_nullable(__binary_tfidf()), "resolved_title"),
-            ("bow_excerpt", self._protect_nullable(__binary_tfidf()), "excerpt"),
+            # ("bow_resolved_title", self._protect_nullable(__binary_tfidf()), "resolved_title"),
+            # ("bow_excerpt", self._protect_nullable(__binary_tfidf()), "excerpt"),
+            ("emb_resolved_title", self._protect_nullable(__spacy_embeddings()), "resolved_title"),
         ], remainder="drop")
 
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
