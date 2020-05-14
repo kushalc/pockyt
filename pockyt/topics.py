@@ -1,40 +1,62 @@
 import logging
-import requests
 from urllib.parse import urlparse
 
-import regex as re
-import spacy
 import numpy as np
 import pandas as pd
+import regex as re
+import requests
+import spacy
 from bs4 import BeautifulSoup
+from sklearn import compose as cp
+from sklearn import dummy
+from sklearn import feature_extraction as fe
+from sklearn import multioutput, naive_bayes
+from sklearn import preprocessing as pp
 from sklearn.pipeline import make_pipeline
-from sklearn import compose as cp, dummy, feature_extraction as fe, impute, multioutput, naive_bayes, neighbors, preprocessing as pp
 
 # FIXME: Remove me.
-from util.caching import cache_parquet_today, cache_today
+from util.caching import cache_today
 from util.performance import instrument_latency
 
 STOPWORDS = [
-    "a", "about", "above", "above", "across", "after", "afterwards", "again", "against", "all", "almost", "alone", "along", "already", "also",
-    "although","always","am","among", "amongst", "amoungst", "amount",  "an", "and", "another", "any","anyhow","anyone","anything","anyway", "anywhere", "are",
-    "around", "as",  "at", "back","be","became", "because","become","becomes", "becoming", "been", "before", "beforehand", "behind", "being", "below", "beside",
-    "besides", "between", "beyond", "bill", "both", "bottom","but", "by", "call", "can", "cannot", "cant", "co", "con", "could", "couldnt", "cry", "de", "describe",
-    "detail", "do", "done", "down", "due", "during", "each", "eg", "eight", "either", "eleven","else", "elsewhere", "empty", "enough", "etc", "even", "ever",
-    "every", "everyone", "everything", "everywhere", "except", "few", "fifteen", "fify", "fill", "find", "fire", "first", "five", "for", "former", "formerly",
-    "forty", "found", "four", "from", "front", "full", "further", "get", "give", "go", "had", "has", "hasnt", "have", "he", "hence", "her", "here", "hereafter",
-    "hereby", "herein", "hereupon", "hers", "herself", "him", "himself", "his", "how", "however", "hundred", "ie", "if", "in", "inc", "indeed", "interest",
-    "into", "is", "it", "its", "itself", "keep", "last", "latter", "latterly", "least", "less", "ltd", "made", "many", "may", "me", "meanwhile", "might", "mill",
-    "mine", "more", "moreover", "most", "mostly", "move", "much", "must", "my", "myself", "name", "namely", "neither", "never", "nevertheless", "next", "nine",
-    "no", "nobody", "none", "noone", "nor", "not", "nothing", "now", "nowhere", "of", "off", "often", "on", "once", "one", "only", "onto", "or", "other", "others",
-    "otherwise", "our", "ours", "ourselves", "out", "over", "own","part", "per", "perhaps", "please", "put", "rather", "re", "same", "see", "seem", "seemed",
-    "seeming", "seems", "serious", "several", "she", "should", "show", "side", "since", "sincere", "six", "sixty", "so", "some", "somehow", "someone", "something",
-    "sometime", "sometimes", "somewhere", "still", "such", "system", "take", "ten", "than", "that", "the", "their", "them", "themselves", "then", "thence", "there",
-    "thereafter", "thereby", "therefore", "therein", "thereupon", "these", "they", "thick", "thin", "third", "this", "those", "though", "three", "through",
-    "throughout", "thru", "thus", "to", "together", "too", "top", "toward", "towards", "twelve", "twenty", "two", "un", "under", "until", "up", "upon", "us",
-    "very", "via", "was", "we", "well", "were", "what", "whatever", "when", "whence", "whenever", "where", "whereafter", "whereas", "whereby", "wherein",
-    "whereupon", "wherever", "whether", "which", "while", "whither", "who", "whoever", "whole", "whom", "whose", "why", "will", "with", "within", "without",
-    "would", "yet", "you", "your", "yours", "yourself", "yourselves", "the"
+    "a", "about", "above", "above", "across", "after", "afterwards", "again", "against", "all", "almost", "alone", "along", "already",
+    "also", "although", "always", "am", "among", "amongst", "amoungst", "amount", "an", "and", "another", "any", "anyhow", "anyone",
+    "anything", "anyway", "anywhere", "are", "around", "as", "at", "back", "be", "became", "because", "become", "becomes", "becoming",
+    "been", "before", "beforehand", "behind", "being", "below", "beside", "besides", "between", "beyond", "bill", "both", "bottom",
+    "but", "by", "call", "can", "cannot", "cant", "co", "con", "could", "couldnt", "cry", "de", "describe", "detail", "do", "done",
+    "down", "due", "during", "each", "eg", "eight", "either", "eleven", "else", "elsewhere", "empty", "enough", "etc", "even", "ever",
+    "every", "everyone", "everything", "everywhere", "except", "few", "fifteen", "fify", "fill", "find", "fire", "first", "five",
+    "for", "former", "formerly", "forty", "found", "four", "from", "front", "full", "further", "get", "give", "go", "had", "has",
+    "hasnt", "have", "he", "hence", "her", "here", "hereafter", "hereby", "herein", "hereupon", "hers", "herself", "him", "himself",
+    "his", "how", "however", "hundred", "ie", "if", "in", "inc", "indeed", "interest", "into", "is", "it", "its", "itself", "keep",
+    "last", "latter", "latterly", "least", "less", "ltd", "made", "many", "may", "me", "meanwhile", "might", "mill", "mine", "more",
+    "moreover", "most", "mostly", "move", "much", "must", "my", "myself", "name", "namely", "neither", "never", "nevertheless", "next",
+    "nine", "no", "nobody", "none", "noone", "nor", "not", "nothing", "now", "nowhere", "of", "off", "often", "on", "once", "one",
+    "only", "onto", "or", "other", "others", "otherwise", "our", "ours", "ourselves", "out", "over", "own", "part", "per", "perhaps",
+    "please", "put", "rather", "re", "same", "see", "seem", "seemed", "seeming", "seems", "serious", "several", "she", "should",
+    "show", "side", "since", "sincere", "six", "sixty", "so", "some", "somehow", "someone", "something", "sometime", "sometimes",
+    "somewhere", "still", "such", "system", "take", "ten", "than", "that", "the", "their", "them", "themselves", "then", "thence",
+    "there", "thereafter", "thereby", "therefore", "therein", "thereupon", "these", "they", "thick", "thin", "third", "this", "those",
+    "though", "three", "through", "throughout", "thru", "thus", "to", "together", "too", "top", "toward", "towards", "twelve",
+    "twenty", "two", "un", "under", "until", "up", "upon", "us", "very", "via", "was", "we", "well", "were", "what", "whatever",
+    "when", "whence", "whenever", "where", "whereafter", "whereas", "whereby", "wherein", "whereupon", "wherever", "whether", "which",
+    "while", "whither", "who", "whoever", "whole", "whom", "whose", "why", "will", "with", "within", "without", "would", "yet", "you",
+    "your", "yours", "yourself", "yourselves", "the"
 ]
+
+
+TAGGABLE_IVARS = [
+    "resolved_title",
+    "excerpt",
+    "text",
+    "combined_title",
+    "combined_text",
+    "resolved_url",
+    "resolved_domain",
+    "resolved_path",
+    "time_added",
+]
+
 
 class AutoTagger(multioutput.MultiOutputClassifier):
     def __init__(self, featurizer=None, estimator=None, proba_min=0.750):
@@ -66,7 +88,7 @@ class AutoTagger(multioutput.MultiOutputClassifier):
 
     def transform(self, untagged_df):
         # classification-based
-        tagged_df = pd.DataFrame({ "classifier_tags": self.binarizer_.inverse_transform(self.predict(untagged_df)) },
+        tagged_df = pd.DataFrame({"classifier_tags": self.binarizer_.inverse_transform(self.predict(untagged_df))},
                                  index=untagged_df.index)
         tagged_df.index.name = "item_id"
 
@@ -82,9 +104,9 @@ class AutoTagger(multioutput.MultiOutputClassifier):
     def _build_estimator(self):
         raise NotImplementedError()
 
-    def _protect_nullable(self, featurizer, fill_value=""):
-        return make_pipeline(pp.FunctionTransformer(lambda df: df.fillna(fill_value)),
-                             featurizer)
+    # def _protect_nullable(self, featurizer, fill_value=""):
+    #     return make_pipeline(pp.FunctionTransformer(lambda df: df.fillna(fill_value)),
+    #                          featurizer)
 
 # class NullableTransformer(object):
 #     def __init__(self, transformer, fill_value=""):
@@ -99,8 +121,10 @@ class AutoTagger(multioutput.MultiOutputClassifier):
 #         Xt[pd.isnull(X)] = pd.NA
 #         return Xt
 
-def _protect_nullable(featurizer, fill_value=""):
-    return NullableTransformer(featurizer, fill_value=fill_value)
+
+# def _protect_nullable(featurizer, fill_value=""):
+#     return NullableTransformer(featurizer, fill_value=fill_value)
+
 
 class AutoTagger__Dummy(AutoTagger):
     def _build_estimator(self):
@@ -110,6 +134,7 @@ class AutoTagger__Dummy(AutoTagger):
         return cp.ColumnTransformer([
             ("title_bow", self._protect_nullable(fe.text.CountVectorizer()), "resolved_title"),
         ], remainder="drop")
+
 
 class AutoTagger__NaiveBayes(AutoTagger):
     def _build_estimator(self):
@@ -143,7 +168,7 @@ class AutoTagger__NaiveBayes(AutoTagger):
             # FIXME: Remove me.
             @instrument_latency
             def __transform(texts_s):
-                text_df = spark.createDataFrame(pd.DataFrame({ "text": texts_s }))
+                text_df = spark.createDataFrame(pd.DataFrame({"text": texts_s}))
                 results_df = embedder.transform(pipeline.transform(text_df))
 
                 # FIXME: Hacky. There's surely a better way to do this.
@@ -170,9 +195,11 @@ class AutoTagger__NaiveBayes(AutoTagger):
             ("counts_title", fe.text.TfidfVectorizer(min_df=5, max_df=0.100, binary=True, stop_words=STOPWORDS), "combined_title"),
         ], remainder="drop")
 
+
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__NaiveBayes):
     tagger = model_cls().fit(tagged_df[_get_ivars(tagged_df)], tagged_df["tags"])
     return tagger
+
 
 def augment_dataset(saved_df):
     # domain
@@ -203,7 +230,7 @@ def augment_dataset(saved_df):
     def __retrieve_html(url):
         try:
             return requests.get(url, timeout=3.000).text
-        except:
+        except BaseException:
             logging.warn("Couldn't retrieve URL: %s", url, exc_info=True)
             return pd.NA
 
@@ -228,17 +255,7 @@ def augment_dataset(saved_df):
     # saved_df["combined_text"] = saved_df["text"].fillna("")
     return saved_df
 
-TAGGABLE_IVARS = [
-    "resolved_title",
-    "excerpt",
-    "text",
-    "combined_title",
-    "combined_text",
-    "resolved_url",
-    "resolved_domain",
-    "resolved_path",
-    "time_added",
-]
+
 def _get_ivars(tagged_df):
     # FIXME: Brittle.
     # return [col for col in tagged_df.columns if col not in ["tags", "videos", "amp_url", "given_title"]]
