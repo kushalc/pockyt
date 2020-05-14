@@ -62,6 +62,22 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         return make_pipeline(pp.FunctionTransformer(lambda df: df.fillna(fill_value)),
                              featurizer)
 
+# class NullableTransformer(object):
+#     def __init__(self, transformer, fill_value=""):
+#         self.transformer = transformer
+#         self.fill_value = fill_value
+
+#     def fit(self, *nargs, **kwargs):
+#         return self.transformer.fit(*nargs, **kwargs)
+
+#     def transform(self, X):
+#         Xt = self.transformer.transform(X.fillna(self.fill_value))
+#         Xt[pd.isnull(X)] = pd.NA
+#         return Xt
+
+def _protect_nullable(featurizer, fill_value=""):
+    return NullableTransformer(featurizer, fill_value=fill_value)
+
 class AutoTagger__Dummy(AutoTagger):
     def _build_estimator(self):
         return dummy.DummyClassifier(strategy="stratified")
@@ -89,11 +105,11 @@ class AutoTagger__KNN(AutoTagger):
                 return np.vstack([doc.vector for doc in nlp.pipe(texts_s, disable=["tagger", "parser", "ner"])])
             return pp.FunctionTransformer(__transform)
 
-        from sparknlp.annotator import SentenceEmbeddings
-        from sparknlp.pretrained import PretrainedPipeline
-        import sparknlp
+        # from sparknlp.annotator import SentenceEmbeddings
+        # from sparknlp.pretrained import PretrainedPipeline
+        # import sparknlp
 
-        spark = sparknlp.start()
+        # spark = sparknlp.start()
         def __sparknlp_embeddings():
             pipeline = PretrainedPipeline("explain_document_dl", lang="en")
             embedder = SentenceEmbeddings().setInputCols(["document", "embeddings"]) \
@@ -127,7 +143,7 @@ class AutoTagger__KNN(AutoTagger):
             # NOTE: Distracts from more effective content-based features. When used, need one-hot encoding
             # since ordinal encoding breaks KNN.
             # ("url_domain", self._protect_nullable(fe.text.CountVectorizer(min_df=1)), "resolved_domain"),
-            ("url_categories", self._protect_nullable(fe.text.CountVectorizer(max_df=0.250, min_df=5)), "resolved_path"),
+            ("url_categories", self._protect_nullable(fe.text.CountVectorizer(min_df=5, binary=True)), "resolved_path"),
         ], remainder="drop")
 
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
