@@ -73,6 +73,9 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         self.binarizer_ = pp.MultiLabelBinarizer().fit(y)
         self.featurizer_ = self.featurizer.fit(X)
 
+        self.domains_ = X["resolved_domain"].value_counts()
+        self.domains_ = self.domains_[self.domains_ >= 3]
+
         Yt = pd.DataFrame(self.binarizer_.transform(y), index=X.index, columns=self.binarizer_.classes_)
         Xt = self.featurizer_.transform(X)
         return super().fit(Xt, Yt)
@@ -93,7 +96,7 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         tagged_df.index.name = "item_id"
 
         # domain-based
-        tagged_df["domain_tags"] = untagged_df["resolved_domain"].apply(lambda x: (x,))
+        tagged_df["domain_tags"] = untagged_df["resolved_domain"].apply(lambda x: (x,) if x in self.domains_.index else ())
 
         tagged_df["tags"] = tagged_df.sum(axis=1)
         return tagged_df
@@ -209,7 +212,7 @@ def augment_dataset(saved_df):
             return pd.NA
         domain = urlparse(url).hostname
 
-        count = 2 if re.match(".*(com|org|net|edu|gov|co|io|google|biz|is|engineering)$", domain) else 3
+        count = 2 if re.match(".*(com|org|net|edu|gov|co|io|it|google|biz|is|engineering)$", domain) else 3
         domain = ".".join(domain.rsplit(".")[-count:])
         return domain
     saved_df["resolved_domain"] = saved_df["resolved_url"].apply(__extract_domain)
