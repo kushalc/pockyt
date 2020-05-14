@@ -191,7 +191,14 @@ class Pockyt(object):
             "favorite items : <option> : {-1: None, [1: favorite, 0: unfavorite]}",
         )
         options.add_argument(
-            "-A",
+            "-t",
+            "--tag",
+            default=None,
+            choices=["add", "replace"],
+            help="add/replace tags",
+        )
+        options.add_argument(
+            "-T",
             "--auto-tag",
             default=None,
             choices=["add", "replace"],

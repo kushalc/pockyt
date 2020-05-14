@@ -260,6 +260,7 @@ class Client(object):
         self._api_request()
 
     def _modify(self):
+        auto_tag = False
         if self._args.delete:
             action = "delete"
         elif self._args.archive != -1:
@@ -272,12 +273,15 @@ class Client(object):
                 action = "favorite"
             else:
                 action = "unfavorite"
+        elif self._args.tag:
+            action = "tags_" + self._args.tag
         elif self._args.auto_tag:
             action = "tags_" + self._args.auto_tag
+            auto_tag = True
         else:
             action = ""
 
-        if not action.startswith("tags_"):
+        if not auto_tag:
             actions = []
             for info in self._input:
                 item = {
@@ -286,6 +290,8 @@ class Client(object):
                 }
                 if "time" in info.named:
                     item["time"] = info.named["time"]
+                if "tags" in info.named:
+                    item["tags"] = info.named["tags"]
                 actions.append(item)
 
             payload = { "actions": tuple(actions) }
