@@ -60,7 +60,7 @@ class Client(object):
 
         # access API
         responses = []
-        for batch in __batch_payload(250):
+        for batch in __batch_payload(125):
             logging.info("Executing network request with %d actions: %.1000s...",
                          len(batch.get("actions", [None])), batch)
             responses.append(Network.post_request(endpoint, batch))

@@ -59,13 +59,13 @@ TAGGABLE_IVARS = [
 
 
 class AutoTagger(multioutput.MultiOutputClassifier):
-    def __init__(self, featurizer=None, estimator=None, proba_min=0.750):
+    def __init__(self, featurizer=None, estimator=None, proba_min=0.700, tags_max=5):
         if featurizer is None:
             featurizer = self._build_featurizer()
         if estimator is None:
             estimator = self._build_estimator()
         super().__init__(estimator=estimator)
-        self.set_params(featurizer=featurizer, proba_min=proba_min)
+        self.set_params(featurizer=featurizer, proba_min=proba_min, tags_max=tags_max)
 
     # FIXME: Remove me.
     @instrument_latency
@@ -83,7 +83,7 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         untagged_df = untagged_df[_get_ivars(untagged_df)]
         Xt = self.featurizer_.transform(untagged_df)
         Yt_proba = np.dstack(super().predict_proba(Xt))[:, 1, :]
-        Yt = (Yt_proba >= self.proba_min).astype(int)
+        Yt = (Yt_proba > np.sort(Yt_proba, axis=1)[:, -self.tags_max].clip(min=self.proba_min).reshape(-1, 1)).astype(int)
         return Yt
 
     def transform(self, untagged_df):
@@ -192,7 +192,8 @@ class AutoTagger__NaiveBayes(AutoTagger):
             # NOTE: Distracts from more effective content-based features. When used, need one-hot encoding
             # since ordinal encoding breaks KNN.
             # ("url_domain", self._protect_nullable(fe.text.CountVectorizer(min_df=1)), "resolved_domain"),
-            ("counts_title", fe.text.TfidfVectorizer(min_df=5, max_df=0.100, binary=True, stop_words=STOPWORDS), "combined_title"),
+            ("counts_title", fe.text.TfidfVectorizer(min_df=2, max_df=0.100, ngram_range=(1, 5),
+                                                     binary=True, stop_words=STOPWORDS), "combined_title"),
         ], remainder="drop")
 
 
