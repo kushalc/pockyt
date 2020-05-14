@@ -292,6 +292,8 @@ class Client(object):
                     item["time"] = info.named["time"]
                 if "tags" in info.named:
                     item["tags"] = info.named["tags"]
+                    if action == "tags_add" and not items["tags"]:
+                        continue
                 actions.append(item)
 
             payload = { "actions": tuple(actions) }
