@@ -47,9 +47,7 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         tagged_df.index.name = "item_id"
 
         # domain-based
-        tfr = self.featurizer_.named_transformers_["url_domain"].steps[1][1]
-        tagged_df["domain_tags"] = tfr.inverse_transform(tfr.transform(untagged_df[["resolved_domain"]])).reshape(-1)
-        tagged_df["domain_tags"] = tagged_df["domain_tags"].apply(lambda x: (x,) if pd.notnull(x) else ())
+        tagged_df["domain_tags"] = untagged_df["resolved_domain"].apply(lambda x: (x,))
 
         tagged_df["tags"] = tagged_df.sum(axis=1)
         return tagged_df
@@ -63,17 +61,6 @@ class AutoTagger(multioutput.MultiOutputClassifier):
     def _protect_nullable(self, featurizer, fill_value=""):
         return make_pipeline(pp.FunctionTransformer(lambda df: df.fillna(fill_value)),
                              featurizer)
-
-class ResilientOrdinalEncoder(pp.OrdinalEncoder):
-    def transform(self, X):
-        X_int, X_mask = self._transform(X, handle_unknown="ignore")
-        X_int[~X_mask] = -1
-        return X_int.astype(self.dtype, copy=False)
-
-    def inverse_transform(self, X):
-        Xt = super().inverse_transform(X)
-        Xt[X == -1] = pd.NA
-        return Xt
 
 class AutoTagger__Dummy(AutoTagger):
     def _build_estimator(self):
@@ -136,8 +123,11 @@ class AutoTagger__KNN(AutoTagger):
             # ("emb_resolved_title", self._protect_nullable(__sparknlp_embeddings()), "resolved_title"),
             # ("emb_excerpt", self._protect_nullable(__sparknlp_embeddings()), "excerpt"),
             # ("emb_text", self._protect_nullable(__sparknlp_embeddings()), "text"),
-            ("url_domain", self._protect_nullable(ResilientOrdinalEncoder()), ["resolved_domain"]),
-            ("url_categories", self._protect_nullable(fe.text.CountVectorizer(max_df=0.250, min_df=10)), "resolved_path"),
+
+            # NOTE: Distracts from more effective content-based features. When used, need one-hot encoding
+            # since ordinal encoding breaks KNN.
+            # ("url_domain", self._protect_nullable(fe.text.CountVectorizer(min_df=1)), "resolved_domain"),
+            ("url_categories", self._protect_nullable(fe.text.CountVectorizer(max_df=0.250, min_df=5)), "resolved_path"),
         ], remainder="drop")
 
 def build_auto_tagger(tagged_df, model_cls=AutoTagger__KNN):
