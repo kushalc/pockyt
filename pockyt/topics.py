@@ -41,7 +41,7 @@ STOPWORDS = [
     "twenty", "two", "un", "under", "until", "up", "upon", "us", "very", "via", "was", "we", "well", "were", "what", "whatever",
     "when", "whence", "whenever", "where", "whereafter", "whereas", "whereby", "wherein", "whereupon", "wherever", "whether", "which",
     "while", "whither", "who", "whoever", "whole", "whom", "whose", "why", "will", "with", "within", "without", "would", "yet", "you",
-    "your", "yours", "yourself", "yourselves", "the"
+    "your", "yours", "yourself", "yourselves", "the",
 ]
 
 
@@ -99,6 +99,18 @@ class AutoTagger(multioutput.MultiOutputClassifier):
         tagged_df["domain_tags"] = untagged_df["resolved_domain"].apply(lambda x: (x,) if x in self.domains_.index else ())
 
         tagged_df["tags"] = tagged_df.sum(axis=1)
+
+        tfidf = self.featurizer_.named_transformers_["counts_title"]
+        vocab_s = pd.Series(tfidf.idf_[list(tfidf.vocabulary_.values())], index=list(tfidf.vocabulary_.keys())).sort_values(ascending=False)
+        def __displayable_pd(df, per=25):
+            indices = list(df.iloc[list(range(per))].index) + \
+                      [pd.NA] + \
+                      list(df.iloc[sorted(np.random.choice(range(per, len(df)-per), per, replace=True))].index) + \
+                      [pd.NA] + \
+                      list(df.iloc[list(range(len(df)-per, len(df)))].index)
+            return df.reindex(indices)
+        logging.info("Introspecting counts_title vocabulary:\n%s",
+                     __displayable_pd(vocab_s).to_string().replace("NaN", "..."))
         return tagged_df
 
     def _build_featurizer(self):
@@ -195,7 +207,7 @@ class AutoTagger__NaiveBayes(AutoTagger):
             # NOTE: Distracts from more effective content-based features. When used, need one-hot encoding
             # since ordinal encoding breaks KNN.
             # ("url_domain", self._protect_nullable(fe.text.CountVectorizer(min_df=1)), "resolved_domain"),
-            ("counts_title", fe.text.TfidfVectorizer(min_df=2, max_df=0.100, ngram_range=(1, 5),
+            ("counts_title", fe.text.TfidfVectorizer(min_df=2, max_df=0.250, ngram_range=(1, 5),
                                                      binary=True, stop_words=STOPWORDS), "combined_title"),
         ], remainder="drop")
 
@@ -255,7 +267,9 @@ def augment_dataset(saved_df):
     # saved_df["text"] = saved_df["text"].str.strip().str.replace(r"\s{2,}", " ")
     # saved_df.loc[saved_df["text"].str.len() == 0, "text"] = pd.NA
 
-    saved_df["combined_title"] = saved_df[["resolved_title", "resolved_path"]].fillna("").apply(" ".join, axis=1)
+    saved_df["combined_title"] = saved_df[["resolved_title", "resolved_path"]].fillna("") \
+                                                                              .apply(" ".join, axis=1) \
+                                                                              .str.replace(r"\b.*\d.*\b", "DDD")
     # saved_df["combined_text"] = saved_df["text"].fillna("")
     return saved_df
 
